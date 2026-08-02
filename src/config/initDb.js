@@ -38,9 +38,10 @@ async function initDb() {
     const locCount = await client.query('SELECT COUNT(*) FROM locations');
     if (parseInt(locCount.rows[0].count, 10) === 0) {
       const locations = [
+        'Avinal Campo 1 - Bagni in muratura',
+        'Avinal Campo 2 - entrata',
+        'Avinal Campo 3 - prato non attrezzato',
         'Avinal Casa',
-        'Avinal Basso',
-        'Avinal Alto',
         'Avinal Tutto',
         'Ospitale di Cadore',
         'Col Pigner',
@@ -87,11 +88,21 @@ async function initDb() {
         prenotazione_id INT REFERENCES prenotazioni(id) ON DELETE CASCADE,
         mittente_id    INT REFERENCES users(id) ON DELETE SET NULL,
         mittente_ruolo VARCHAR(20) NOT NULL,   -- 'utente' | 'admin'
-        testo          TEXT NOT NULL,
+        testo          TEXT NOT NULL DEFAULT '',
+        allegato_nome  VARCHAR(255),           -- nome file (se presente)
+        allegato_tipo  VARCHAR(120),           -- MIME type (es. image/jpeg, application/pdf)
+        allegato_dati  TEXT,                    -- contenuto file in base64 (data URL)
         letto          BOOLEAN NOT NULL DEFAULT FALSE,
         creato_il      TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `);
+
+    // Migrazione: se la tabella messaggi esisteva già senza le colonne allegato,
+    // le aggiunge (ALTER ... IF NOT EXISTS è sicuro e idempotente).
+    await client.query(`ALTER TABLE messaggi ALTER COLUMN testo SET DEFAULT '';`);
+    await client.query(`ALTER TABLE messaggi ADD COLUMN IF NOT EXISTS allegato_nome VARCHAR(255);`);
+    await client.query(`ALTER TABLE messaggi ADD COLUMN IF NOT EXISTS allegato_tipo VARCHAR(120);`);
+    await client.query(`ALTER TABLE messaggi ADD COLUMN IF NOT EXISTS allegato_dati TEXT;`);
 
     // --- NOTIFICHE ---
     await client.query(`
