@@ -13,10 +13,16 @@
  * prenotazione va considerata "sovrapposta" (oltre a se stessa).
  */
 export const CONFLITTI = {
-  'Avinal Tutto': ['Avinal Casa', 'Avinal Basso', 'Avinal Alto'],
+  'Avinal Tutto': [
+    'Avinal Campo 1 - Bagni in muratura',
+    'Avinal Campo 2 - entrata',
+    'Avinal Campo 3 - prato non attrezzato',
+    'Avinal Casa',
+  ],
+  'Avinal Campo 1 - Bagni in muratura': ['Avinal Tutto'],
+  'Avinal Campo 2 - entrata': ['Avinal Tutto'],
+  'Avinal Campo 3 - prato non attrezzato': ['Avinal Tutto'],
   'Avinal Casa': ['Avinal Tutto'],
-  'Avinal Basso': ['Avinal Tutto'],
-  'Avinal Alto': ['Avinal Tutto'],
   'Ospitale di Cadore': [],
   'Col Pigner': [],
 };
