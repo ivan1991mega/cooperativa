@@ -45,22 +45,51 @@ router.get('/:prenotazioneId', richiediAuth, async (req, res) => {
 });
 
 // --- INVIO MESSAGGIO ---
+// Limite dimensione allegato: 5 MB. In base64 il testo è ~1.37x i byte reali,
+// quindi ~7 MB di stringa. Alziamo il limite del body JSON di conseguenza (vedi server.js).
+const MAX_ALLEGATO_BYTES = 5 * 1024 * 1024;
+const TIPI_AMMESSI = [
+  'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/heic',
+  'application/pdf',
+];
+
 router.post('/:prenotazioneId', richiediAuth, async (req, res) => {
   const { prenotazioneId } = req.params;
-  const { testo } = req.body;
+  const { testo, allegato } = req.body;
+  // allegato (facoltativo) = { nome, tipo, dati }  dove dati è un data URL base64
 
-  if (!testo || !testo.trim()) {
+  const testoPulito = (testo || '').trim();
+
+  // Serve almeno un testo oppure un allegato
+  if (!testoPulito && !allegato) {
     return res.status(400).json({ errore: 'Messaggio vuoto' });
   }
   if (!(await puoAccedere(prenotazioneId, req.user))) {
     return res.status(403).json({ errore: 'Non autorizzato' });
   }
 
+  // Validazione allegato
+  let allNome = null, allTipo = null, allDati = null;
+  if (allegato) {
+    allNome = (allegato.nome || 'allegato').slice(0, 255);
+    allTipo = allegato.tipo || '';
+    allDati = allegato.dati || '';
+    if (!TIPI_AMMESSI.includes(allTipo)) {
+      return res.status(400).json({ errore: 'Tipo di file non ammesso (foto o PDF)' });
+    }
+    // Stima dimensione reale dalla lunghezza base64
+    const base64 = allDati.split(',')[1] || '';
+    const bytes = Math.floor(base64.length * 3 / 4);
+    if (bytes > MAX_ALLEGATO_BYTES) {
+      return res.status(400).json({ errore: 'File troppo grande (massimo 5 MB)' });
+    }
+  }
+
   try {
     const result = await pool.query(
-      `INSERT INTO messaggi (prenotazione_id, mittente_id, mittente_ruolo, testo)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [prenotazioneId, req.user.id, req.user.ruolo, testo.trim()]
+      `INSERT INTO messaggi (prenotazione_id, mittente_id, mittente_ruolo, testo, allegato_nome, allegato_tipo, allegato_dati)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [prenotazioneId, req.user.id, req.user.ruolo, testoPulito, allNome, allTipo, allDati]
     );
     const msg = { ...result.rows[0], mittente_nome: req.user.nome };
 
