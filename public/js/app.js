@@ -506,12 +506,9 @@ async function renderCalendarioAdmin() {
 
   const legenda = `
     <div class="cal-legenda">
-      <span><span class="cal-dot" style="background:#264653"></span>Avinal Tutto</span>
-      <span><span class="cal-dot" style="background:#1e6f5c"></span>Avinal Casa</span>
-      <span><span class="cal-dot" style="background:#2a9d8f"></span>Avinal Basso</span>
-      <span><span class="cal-dot" style="background:#457b9d"></span>Avinal Alto</span>
-      <span><span class="cal-dot" style="background:#e76f51"></span>Ospitale</span>
-      <span><span class="cal-dot" style="background:#9b5de5"></span>Col Pigner</span>
+      ${stato.locations.map((l) => `
+        <span><span class="cal-dot" style="background:${coloreLocation(l.nome)}"></span>${esc(etichettaCorta(l.nome))}</span>
+      `).join('')}
     </div>
   `;
 
@@ -740,8 +737,11 @@ async function apriDettaglio(id) {
       <h3 style="margin-top:20px">💬 Chat con ${isAdmin ? 'l\'utente' : 'l\'amministrazione'}</h3>
       <div class="chat-box">
         <div class="chat-messaggi" id="chat-messaggi"><div class="spinner"></div></div>
+        <div id="chat-anteprima" style="display:none"></div>
         <div class="chat-input">
-          <input type="text" id="chat-input" placeholder="Scrivi un messaggio..." maxlength="1000">
+          <input type="file" id="chat-file" accept="image/*,application/pdf" style="display:none">
+          <button class="btn btn-secondario btn-piccolo" title="Allega foto o PDF" onclick="document.getElementById('chat-file').click()">📎</button>
+          <input type="text" id="chat-input" placeholder="Scrivi un messaggio o un link..." maxlength="1000">
           <button class="btn" onclick="inviaChat(${p.id})">Invia</button>
         </div>
       </div>
@@ -755,6 +755,9 @@ async function apriDettaglio(id) {
     input.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') inviaChat(p.id);
     });
+    // Gestione selezione file
+    const fileInput = document.getElementById('chat-file');
+    fileInput.addEventListener('change', gestisciSelezioneFile);
     input.focus();
 
   } catch (err) {
@@ -789,6 +792,32 @@ async function caricaChat(prenId) {
   } catch {}
 }
 
+// Trasforma gli URL nel testo in link cliccabili (in modo sicuro, dopo l'escape)
+function linkificaTesto(testo) {
+  const escaped = esc(testo);
+  return escaped.replace(/(https?:\/\/[^\s<]+)/g, (url) =>
+    `<a href="${url}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline">${url}</a>`
+  );
+}
+
+// Costruisce l'HTML dell'allegato (immagine mostrata, PDF/altro come link scaricabile)
+function renderAllegato(msg) {
+  if (!msg.allegato_dati) return '';
+  const nome = esc(msg.allegato_nome || 'allegato');
+  if ((msg.allegato_tipo || '').startsWith('image/')) {
+    return `<div style="margin-top:6px">
+      <a href="${msg.allegato_dati}" target="_blank" rel="noopener">
+        <img src="${msg.allegato_dati}" alt="${nome}" style="max-width:200px;max-height:200px;border-radius:8px;display:block">
+      </a>
+    </div>`;
+  }
+  // PDF o altro: link per aprire/scaricare
+  return `<div style="margin-top:6px">
+    <a href="${msg.allegato_dati}" download="${nome}" target="_blank" rel="noopener"
+       style="color:inherit;text-decoration:underline">📄 ${nome}</a>
+  </div>`;
+}
+
 function aggiungiMessaggioChat(msg) {
   const box = document.getElementById('chat-messaggi');
   if (!box) return;
@@ -801,21 +830,60 @@ function aggiungiMessaggioChat(msg) {
   el.className = `chat-msg ${mio ? 'mio' : 'altro'}`;
   el.innerHTML = `
     ${!mio ? `<div class="autore">${esc(msg.mittente_nome || (msg.mittente_ruolo === 'admin' ? 'Amministrazione' : 'Utente'))}</div>` : ''}
-    <div>${esc(msg.testo)}</div>
+    ${msg.testo ? `<div>${linkificaTesto(msg.testo)}</div>` : ''}
+    ${renderAllegato(msg)}
     <div class="ora">${formatOra(msg.creato_il)}</div>
   `;
   box.appendChild(el);
   box.scrollTop = box.scrollHeight;
 }
 
+// Allegato selezionato, in attesa di invio
+let allegatoInSospeso = null;
+
+function gestisciSelezioneFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const MAX = 5 * 1024 * 1024;
+  if (file.size > MAX) {
+    toast('File troppo grande (massimo 5 MB)');
+    e.target.value = '';
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    allegatoInSospeso = { nome: file.name, tipo: file.type, dati: reader.result };
+    const prev = document.getElementById('chat-anteprima');
+    if (prev) {
+      prev.style.display = 'block';
+      prev.style.padding = '8px 12px';
+      prev.style.fontSize = '13px';
+      prev.innerHTML = `📎 ${esc(file.name)} pronto per l'invio
+        <a onclick="annullaAllegato()" style="cursor:pointer;color:var(--rosso);margin-left:8px">✕ rimuovi</a>`;
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+function annullaAllegato() {
+  allegatoInSospeso = null;
+  const prev = document.getElementById('chat-anteprima');
+  if (prev) { prev.style.display = 'none'; prev.innerHTML = ''; }
+  const fileInput = document.getElementById('chat-file');
+  if (fileInput) fileInput.value = '';
+}
+
 async function inviaChat(prenId) {
   const input = document.getElementById('chat-input');
   const testo = input.value.trim();
-  if (!testo) return;
+  // Serve almeno testo o allegato
+  if (!testo && !allegatoInSospeso) return;
+  const allegato = allegatoInSospeso;
   input.value = '';
+  annullaAllegato();
   try {
-    await API.inviaMessaggio(prenId, testo);
-    // Il messaggio arriverà via socket; in fallback lo aggiungiamo comunque
+    await API.inviaMessaggio(prenId, testo, allegato);
+    // Il messaggio arriverà via socket
   } catch (err) {
     toast('Errore invio: ' + err.message);
   }
