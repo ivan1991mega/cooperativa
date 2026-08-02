@@ -38,7 +38,7 @@ const API = {
 
   // --- Chat ---
   messaggi(prenId) { return this.get(`/api/chat/${prenId}`); },
-  inviaMessaggio(prenId, testo) { return this.post(`/api/chat/${prenId}`, { testo }); },
+  inviaMessaggio(prenId, testo, allegato) { return this.post(`/api/chat/${prenId}`, { testo, allegato }); },
 
   // --- Notifiche ---
   notifiche() { return this.get('/api/notifiche'); },
