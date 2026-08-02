@@ -4,22 +4,42 @@ const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno',
   'Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const GIORNI = ['Lun','Mar','Mer','Gio','Ven','Sab','Dom'];
 
-// Colori per location (coerenti fra legenda ed eventi)
+// Colori ben distinti tra loro (non tonalità di verde) per riconoscere a colpo d'occhio
 const COLORI_LOC = {
-  'Avinal Casa': '#1e6f5c',
-  'Avinal Basso': '#2a9d8f',
-  'Avinal Alto': '#457b9d',
-  'Avinal Tutto': '#264653',
-  'Ospitale di Cadore': '#e76f51',
-  'Col Pigner': '#9b5de5',
+  'Avinal Campo 1 - Bagni in muratura': '#e63946', // rosso
+  'Avinal Campo 2 - entrata': '#f4a261',           // arancio
+  'Avinal Campo 3 - prato non attrezzato': '#2a9d8f', // verde acqua
+  'Avinal Casa': '#457b9d',                         // blu
+  'Avinal Tutto': '#6a4c93',                        // viola
+  'Ospitale di Cadore': '#e76f51',                  // corallo
+  'Col Pigner': '#118ab2',                          // azzurro
 };
 
 function coloreLocation(nome) {
   return COLORI_LOC[nome] || '#636e72';
 }
 
+// Etichette compatte per gli eventi nelle celle (i nomi completi sono lunghi)
+const ETICHETTE_CORTE = {
+  'Avinal Campo 1 - Bagni in muratura': 'A.Campo 1',
+  'Avinal Campo 2 - entrata': 'A.Campo 2',
+  'Avinal Campo 3 - prato non attrezzato': 'A.Campo 3',
+  'Avinal Casa': 'A.Casa',
+  'Avinal Tutto': 'A.Tutto',
+  'Ospitale di Cadore': 'Ospitale',
+  'Col Pigner': 'Col Pigner',
+};
+function etichettaCorta(nome) {
+  return ETICHETTE_CORTE[nome] || nome;
+}
+
 function ymd(date) {
-  return date.toISOString().slice(0, 10);
+  // Usa l'ora LOCALE, non UTC: toISOString() convertirebbe al fuso di Greenwich
+  // facendo "arretrare" la data di un giorno per chi è in Italia (UTC+1/+2).
+  const anno = date.getFullYear();
+  const mese = String(date.getMonth() + 1).padStart(2, '0');
+  const giorno = String(date.getDate()).padStart(2, '0');
+  return `${anno}-${mese}-${giorno}`;
 }
 
 /**
@@ -81,7 +101,7 @@ function renderCalendario(anno, mese, eventi, onClickEvento) {
         const label = ev.creata_da_admin ? '🔒 ' : '';
         html += `<div class="cal-evento" style="background:${colore};opacity:${opacita}"
                   data-id="${ev.id}" title="${ev.location_nome} — ${ev.referente_nome || ''}">
-                  ${label}${ev.location_nome.replace('Avinal ', 'A.')}
+                  ${label}${etichettaCorta(ev.location_nome)}
                  </div>`;
       }
       if (eventiGiorno.length > 3) {
