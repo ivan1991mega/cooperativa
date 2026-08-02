@@ -28,8 +28,13 @@ const io = new Server(httpServer, {
 // Rende io accessibile alle route
 app.set('io', io);
 
+// Railway (e in generale gli hosting) mettono l'app dietro un reverse proxy.
+// Questo dice a Express di fidarsi dell'header X-Forwarded-For, così il
+// rate-limiter identifica correttamente gli utenti e non va in errore.
+app.set('trust proxy', 1);
+
 // --- MIDDLEWARE ---
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '8mb' }));
 app.use(cookieParser());
 
 // Rate limiter sulle API di autenticazione (anti brute-force)
@@ -93,16 +98,33 @@ io.on('connection', (socket) => {
 // --- AVVIO ---
 const PORT = process.env.PORT || 3000;
 
-async function start() {
-  try {
-    // Inizializza il DB all'avvio (crea tabelle se mancano)
-    if (process.env.DATABASE_URL) {
+async function initDbConRetry(tentativi = 5) {
+  for (let i = 1; i <= tentativi; i++) {
+    try {
       await initDb();
-    } else {
-      console.warn('⚠️  Avvio senza DATABASE_URL: configura il database su Railway.');
+      return true;
+    } catch (err) {
+      console.error(`Init DB tentativo ${i}/${tentativi} fallito:`, err.message);
+      if (i < tentativi) {
+        // Attesa crescente: il database su Railway a volte impiega
+        // qualche secondo in più dell'app a diventare raggiungibile.
+        await new Promise((r) => setTimeout(r, 3000));
+      }
     }
-  } catch (err) {
-    console.error('Errore init DB all\'avvio:', err.message);
+  }
+  return false;
+}
+
+async function start() {
+  if (process.env.DATABASE_URL) {
+    const ok = await initDbConRetry();
+    if (!ok) {
+      console.error('❌ Database non raggiungibile dopo vari tentativi. ' +
+        'Verifica che DATABASE_URL sia collegata al servizio su Railway.');
+    }
+  } else {
+    console.warn('⚠️  Avvio senza DATABASE_URL: collega un database PostgreSQL ' +
+      'e aggiungi la variabile DATABASE_URL (Add Reference) al servizio su Railway.');
   }
 
   httpServer.listen(PORT, () => {
