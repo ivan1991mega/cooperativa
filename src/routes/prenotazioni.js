@@ -281,4 +281,24 @@ router.post('/admin', richiediAuth, richiediAdmin, async (req, res) => {
   }
 });
 
+// --- ELIMINAZIONE PRENOTAZIONE (solo admin) ---
+// Cancella la prenotazione e, grazie a ON DELETE CASCADE nello schema,
+// anche i messaggi collegati. Le eventuali notifiche che puntavano alla
+// prenotazione restano come semplice testo (non rompono nulla).
+router.delete('/:id', richiediAuth, richiediAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'DELETE FROM prenotazioni WHERE id = $1 RETURNING id',
+      [req.params.id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ errore: 'Prenotazione non trovata' });
+    }
+    res.json({ ok: true, eliminata: result.rows[0].id });
+  } catch (err) {
+    console.error('Errore eliminazione prenotazione:', err);
+    res.status(500).json({ errore: 'Errore del server' });
+  }
+});
+
 export default router;
