@@ -35,6 +35,7 @@ const API = {
   dettaglio(id) { return this.get(`/api/prenotazioni/${id}`); },
   cambiaStato(id, stato) { return this.patch(`/api/prenotazioni/${id}/stato`, { stato }); },
   creaBloccoAdmin(d) { return this.post('/api/prenotazioni/admin', d); },
+  eliminaPrenotazione(id) { return this.richiesta('DELETE', `/api/prenotazioni/${id}`); },
 
   // --- Chat ---
   messaggi(prenId) { return this.get(`/api/chat/${prenId}`); },
