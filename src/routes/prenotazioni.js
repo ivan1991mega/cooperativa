@@ -61,6 +61,8 @@ router.post('/', richiediAuth, async (req, res) => {
     nota,
     numero_persone,
     tipologia_unita,
+    numero_squadriglie,
+    gruppo_scout,
     referente_nome,
     referente_contatto,
     provenienza_paese,
@@ -78,11 +80,22 @@ router.post('/', richiediAuth, async (req, res) => {
   if (!nota.trim()) {
     return res.status(400).json({ errore: 'La nota è obbligatoria' });
   }
+  if (!gruppo_scout || !gruppo_scout.trim()) {
+    return res.status(400).json({ errore: 'Il gruppo scout è obbligatorio' });
+  }
   if (data_partenza < data_arrivo) {
     return res.status(400).json({ errore: 'La data di partenza precede l\'arrivo' });
   }
   if (!TIPOLOGIE.includes(tipologia_unita)) {
     return res.status(400).json({ errore: 'Tipologia unità non valida' });
+  }
+  // Numero squadriglie obbligatorio solo per esploratori/guide
+  let nSquadriglie = null;
+  if (tipologia_unita === 'esploratori/guide') {
+    nSquadriglie = parseInt(numero_squadriglie, 10);
+    if (!Number.isInteger(nSquadriglie) || nSquadriglie < 1) {
+      return res.status(400).json({ errore: 'Indica il numero di squadriglie' });
+    }
   }
 
   try {
@@ -95,13 +108,15 @@ router.post('/', richiediAuth, async (req, res) => {
     const result = await pool.query(
       `INSERT INTO prenotazioni
         (user_id, location_id, data_arrivo, ora_arrivo, data_partenza, ora_partenza,
-         nota, numero_persone, tipologia_unita, referente_nome, referente_contatto,
+         nota, numero_persone, tipologia_unita, numero_squadriglie, gruppo_scout,
+         referente_nome, referente_contatto,
          provenienza_paese, provenienza_cap, trasbordo, trasbordo_giorni, stato)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'ricevuta')
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'ricevuta')
        RETURNING *`,
       [
         req.user.id, location_id, data_arrivo, ora_arrivo || null, data_partenza,
         ora_partenza || null, nota.trim(), numero_persone || 0, tipologia_unita,
+        nSquadriglie, gruppo_scout.trim(),
         referente_nome || null, referente_contatto || null, provenienza_paese || null,
         provenienza_cap || null, !!trasbordo, trasbordo ? (trasbordo_giorni || 0) : 0,
       ]
@@ -115,6 +130,18 @@ router.post('/', richiediAuth, async (req, res) => {
       dataPartenza: data_partenza,
       escludiId: pren.id,
     });
+
+    // Risposta automatica in chat: conferma presa in carico.
+    // Mittente 'admin' così l'utente la vede come messaggio dell'amministrazione.
+    const testoAuto =
+      'Ciao! Abbiamo ricevuto la tua richiesta e l\'abbiamo presa in carico. ' +
+      'La valuteremo e ti risponderemo entro 10 giorni. ' +
+      'Per qualsiasi comunicazione puoi usare questa chat. Grazie!';
+    await pool.query(
+      `INSERT INTO messaggi (prenotazione_id, mittente_id, mittente_ruolo, testo)
+       VALUES ($1, NULL, 'admin', $2)`,
+      [pren.id, testoAuto]
+    );
 
     // Notifica live agli admin + notifica salvata
     const io = getIo(req);

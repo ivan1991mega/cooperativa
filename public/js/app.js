@@ -177,8 +177,9 @@ function renderAuth() {
   app.innerHTML = `
     <div class="auth-wrap">
       <div class="auth-box">
-        <h1>🏕️ Cooperativa Scout</h1>
-        <p class="sub">Gestione prenotazioni case e terreni</p>
+        <div class="logo-grande">🏕️</div>
+        <h1>Cooperativa Scout</h1>
+        <p class="sub">Prenotazione case e terreni per i campi</p>
         <div id="auth-errore"></div>
         <form id="auth-form">
           ${!isLogin ? `
@@ -236,7 +237,7 @@ function renderAuth() {
 function topbar() {
   return `
     <div class="topbar">
-      <div class="brand">🏕️ Cooperativa Scout ${stato.user.ruolo === 'admin' ? '· Admin' : ''}</div>
+      <div class="brand"><span class="logo">🏕️</span> Cooperativa Scout ${stato.user.ruolo === 'admin' ? '· Admin' : ''}</div>
       <div class="actions">
         <div class="notif-wrap">
           <button class="btn-ghost" onclick="toggleNotifiche()" style="position:relative">
@@ -244,7 +245,7 @@ function topbar() {
             <span class="notif-badge" id="notif-badge" style="display:none">0</span>
           </button>
         </div>
-        <span style="font-size:14px">${esc(stato.user.nome)}</span>
+        <span class="nome-utente">${esc(stato.user.nome)}</span>
         <button class="btn-ghost" onclick="esci()">Esci</button>
       </div>
     </div>
@@ -335,8 +336,17 @@ function renderFormPrenotazione() {
           </div>
           <div class="form-group">
             <label>Tipologia unità <span class="obbligatorio">*</span></label>
-            <select name="tipologia_unita" required>${opzioniTipo}</select>
+            <select name="tipologia_unita" id="tipologia_unita" required>${opzioniTipo}</select>
           </div>
+        </div>
+        <div class="form-group campo-condizionale" id="squadriglie-wrap" style="display:none">
+          <label>Numero di squadriglie <span class="obbligatorio">*</span></label>
+          <input type="number" name="numero_squadriglie" id="numero_squadriglie" min="1" placeholder="Es. 4">
+          <p class="mut" style="margin-top:6px">Richiesto per la tipologia esploratori/guide.</p>
+        </div>
+        <div class="form-group">
+          <label>Gruppo scout <span class="obbligatorio">*</span></label>
+          <input type="text" name="gruppo_scout" required placeholder="Es. Milano 1, Cadore 3...">
         </div>
         <div class="form-row">
           <div class="form-group">
@@ -389,6 +399,19 @@ function renderFormPrenotazione() {
   });
   inputGiorni.addEventListener('input', aggiornaCosto);
 
+  // Mostra il campo squadriglie solo se la tipologia è esploratori/guide
+  const selTipo = document.getElementById('tipologia_unita');
+  const squadWrap = document.getElementById('squadriglie-wrap');
+  const squadInput = document.getElementById('numero_squadriglie');
+  function aggiornaSquadriglie() {
+    const mostra = selTipo.value === 'esploratori/guide';
+    squadWrap.style.display = mostra ? 'block' : 'none';
+    squadInput.required = mostra;
+    if (!mostra) squadInput.value = '';
+  }
+  selTipo.addEventListener('change', aggiornaSquadriglie);
+  aggiornaSquadriglie();
+
   document.getElementById('form-pren').addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
@@ -397,18 +420,24 @@ function renderFormPrenotazione() {
     dati.numero_persone = parseInt(dati.numero_persone || '0', 10);
     dati.trasbordo_giorni = parseInt(dati.trasbordo_giorni || '0', 10);
     dati.location_id = parseInt(dati.location_id, 10);
+    if (dati.tipologia_unita === 'esploratori/guide') {
+      dati.numero_squadriglie = parseInt(dati.numero_squadriglie || '0', 10);
+    } else {
+      delete dati.numero_squadriglie;
+    }
 
     const esito = document.getElementById('form-esito');
     esito.innerHTML = '';
     try {
       const r = await API.creaPrenotazione(dati);
-      let msg = '<div class="successo-msg">✅ Richiesta inviata! Riceverai una email di conferma e ti risponderemo a breve.</div>';
+      let msg = '<div class="successo-msg">Richiesta inviata. Trovi la conferma di presa in carico nella chat della prenotazione; ti risponderemo entro 10 giorni.</div>';
       if (r.conflitti) {
-        msg += `<div class="avviso-conflitto">⚠️ Nota: esistono già ${r.conflitti.length} prenotazione/i sovrapposte per questa location. L'amministrazione valuterà.</div>`;
+        msg += `<div class="avviso-conflitto">Nota: esistono già ${r.conflitti.length} prenotazione/i sovrapposte per questa location. L'amministrazione valuterà.</div>`;
       }
       esito.innerHTML = msg;
       e.target.reset();
       wrapGiorni.style.display = 'none';
+      aggiornaSquadriglie();
       window.scrollTo(0, 0);
     } catch (err) {
       esito.innerHTML = `<div class="errore-msg">${esc(err.message)}</div>`;
@@ -423,11 +452,12 @@ async function renderMiePrenotazioni() {
     const d = await API.miePrenotazioni();
     stato.prenotazioni = d.prenotazioni;
     if (d.prenotazioni.length === 0) {
-      cont.innerHTML = '<div class="card"><div class="vuoto">Non hai ancora prenotazioni.</div></div>';
+      cont.innerHTML = '<div class="card"><div class="vuoto"><span class="icona">📋</span>Non hai ancora prenotazioni. Creane una dalla scheda "Nuova richiesta".</div></div>';
       return;
     }
     cont.innerHTML = `
       <div class="card">
+        <div class="tabella-scroll">
         <table class="tabella">
           <thead><tr>
             <th>Location</th><th>Arrivo</th><th>Partenza</th><th>Persone</th><th>Stato</th>
@@ -435,15 +465,16 @@ async function renderMiePrenotazioni() {
           <tbody>
             ${d.prenotazioni.map((p) => `
               <tr onclick="apriDettaglio(${p.id})">
-                <td>${esc(p.location_nome)}</td>
-                <td>${formatData(p.data_arrivo)}</td>
-                <td>${formatData(p.data_partenza)}</td>
-                <td>${p.numero_persone}</td>
-                <td><span class="badge badge-${p.stato}">${STATI_LABEL[p.stato]}</span></td>
+                <td data-label="Location">${esc(p.location_nome)}</td>
+                <td data-label="Arrivo">${formatData(p.data_arrivo)}</td>
+                <td data-label="Partenza">${formatData(p.data_partenza)}</td>
+                <td data-label="Persone">${p.numero_persone}</td>
+                <td data-label="Stato"><span class="badge badge-${p.stato}">${STATI_LABEL[p.stato]}</span></td>
               </tr>
             `).join('')}
           </tbody>
         </table>
+        </div>
       </div>
     `;
   } catch (err) {
@@ -523,7 +554,7 @@ async function renderCalendarioAdmin() {
         </div>
         ${legenda}
       </div>
-      <div id="cal-container"></div>
+      <div class="cal-scroll"><div id="cal-container"></div></div>
       <p class="mut" style="margin-top:10px">🔒 = periodo bloccato dall'amministrazione · opacità ridotta = non ancora confermata</p>
     </div>
   `;
@@ -573,11 +604,12 @@ async function renderRichiesteAdmin() {
     await caricaTutte();
     const richieste = stato.prenotazioni.filter((p) => !p.creata_da_admin);
     if (richieste.length === 0) {
-      cont.innerHTML = '<div class="card"><div class="vuoto">Nessuna richiesta ricevuta.</div></div>';
+      cont.innerHTML = '<div class="card"><div class="vuoto"><span class="icona">📭</span>Nessuna richiesta ricevuta per ora.</div></div>';
       return;
     }
     cont.innerHTML = `
       <div class="card">
+        <div class="tabella-scroll">
         <table class="tabella">
           <thead><tr>
             <th>Location</th><th>Periodo</th><th>Referente</th><th>Persone</th><th>Unità</th><th>Stato</th>
@@ -585,16 +617,17 @@ async function renderRichiesteAdmin() {
           <tbody>
             ${richieste.map((p) => `
               <tr onclick="apriDettaglio(${p.id})">
-                <td>${esc(p.location_nome)}</td>
-                <td>${formatData(p.data_arrivo)} → ${formatData(p.data_partenza)}</td>
-                <td>${esc(p.referente_nome || p.utente_nome || '-')}</td>
-                <td>${p.numero_persone}</td>
-                <td style="font-size:12px">${esc(p.tipologia_unita)}</td>
-                <td><span class="badge badge-${p.stato}">${STATI_LABEL[p.stato]}</span></td>
+                <td data-label="Location">${esc(p.location_nome)}</td>
+                <td data-label="Periodo">${formatData(p.data_arrivo)} → ${formatData(p.data_partenza)}</td>
+                <td data-label="Referente">${esc(p.referente_nome || p.utente_nome || '-')}</td>
+                <td data-label="Persone">${p.numero_persone}</td>
+                <td data-label="Unità">${esc(p.tipologia_unita)}</td>
+                <td data-label="Stato"><span class="badge badge-${p.stato}">${STATI_LABEL[p.stato]}</span></td>
               </tr>
             `).join('')}
           </tbody>
         </table>
+        </div>
       </div>
     `;
   } catch (err) {
@@ -728,6 +761,8 @@ async function apriDettaglio(id) {
         <div class="riga-info"><strong>Partenza</strong><span>${formatData(p.data_partenza)} ${esc(p.ora_partenza || '')}</span></div>
         <div class="riga-info"><strong>Persone</strong><span>${p.numero_persone}</span></div>
         <div class="riga-info"><strong>Unità</strong><span>${esc(p.tipologia_unita)}</span></div>
+        ${p.numero_squadriglie ? `<div class="riga-info"><strong>Squadriglie</strong><span>${p.numero_squadriglie}</span></div>` : ''}
+        ${p.gruppo_scout ? `<div class="riga-info"><strong>Gruppo scout</strong><span>${esc(p.gruppo_scout)}</span></div>` : ''}
         ${p.referente_nome ? `<div class="riga-info"><strong>Referente</strong><span>${esc(p.referente_nome)}</span></div>` : ''}
         ${p.referente_contatto ? `<div class="riga-info"><strong>Contatto</strong><span>${esc(p.referente_contatto)}</span></div>` : ''}
         ${p.provenienza_paese ? `<div class="riga-info"><strong>Provenienza</strong><span>${esc(p.provenienza_paese)} ${esc(p.provenienza_cap || '')}</span></div>` : ''}

@@ -67,6 +67,8 @@ async function initDb() {
         nota              TEXT NOT NULL,        -- nota obbligatoria arrivo/partenza
         numero_persone    INT NOT NULL DEFAULT 0,
         tipologia_unita   VARCHAR(40) NOT NULL, -- lupetti/coccinelle | esploratori/guide | clan/fuoco | ALTRO
+        numero_squadriglie INT,                 -- obbligatorio solo se esploratori/guide
+        gruppo_scout      VARCHAR(120),          -- gruppo di appartenenza (obbligatorio lato form)
         referente_nome    VARCHAR(120),
         referente_contatto VARCHAR(120),
         provenienza_paese VARCHAR(120),
@@ -104,6 +106,10 @@ async function initDb() {
     await client.query(`ALTER TABLE messaggi ADD COLUMN IF NOT EXISTS allegato_tipo VARCHAR(120);`);
     await client.query(`ALTER TABLE messaggi ADD COLUMN IF NOT EXISTS allegato_dati TEXT;`);
 
+    // Migrazione: campi aggiunti dopo la prima versione
+    await client.query(`ALTER TABLE prenotazioni ADD COLUMN IF NOT EXISTS numero_squadriglie INT;`);
+    await client.query(`ALTER TABLE prenotazioni ADD COLUMN IF NOT EXISTS gruppo_scout VARCHAR(120);`);
+
     // --- NOTIFICHE ---
     await client.query(`
       CREATE TABLE IF NOT EXISTS notifiche (
@@ -122,24 +128,37 @@ async function initDb() {
     await client.query(`CREATE INDEX IF NOT EXISTS idx_msg_pren ON messaggi(prenotazione_id);`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_notif_user ON notifiche(user_id);`);
 
-    // --- ADMIN DI DEFAULT ---
-    const adminEmail = process.env.ADMIN_EMAIL || 'info@cooperativascout.org';
-    const adminExists = await client.query(
-      'SELECT id FROM users WHERE email = $1',
-      [adminEmail]
-    );
-    if (adminExists.rows.length === 0) {
-      const adminPass = process.env.ADMIN_PASSWORD || 'CambiaMiSubito2024!';
-      const hash = await bcrypt.hash(adminPass, 10);
-      await client.query(
-        `INSERT INTO users (nome, email, password_hash, ruolo)
-         VALUES ($1, $2, $3, 'admin')`,
-        ['Amministrazione', adminEmail, hash]
-      );
-      console.log(`✅ Admin creato: ${adminEmail}`);
-      console.log(`   Password iniziale: ${adminPass}`);
-      console.log('   ⚠️  Cambiala dopo il primo accesso!');
+    // --- UTENTI DI DEFAULT ---
+    // Crea un account solo se quell'email non esiste già (idempotente).
+    // I valori si possono sovrascrivere con le variabili d'ambiente.
+    async function creaUtenteSeMancante(nome, email, password, ruolo) {
+      const esiste = await client.query('SELECT id FROM users WHERE email = $1', [email]);
+      if (esiste.rows.length === 0) {
+        const hash = await bcrypt.hash(password, 10);
+        await client.query(
+          `INSERT INTO users (nome, email, password_hash, ruolo)
+           VALUES ($1, $2, $3, $4)`,
+          [nome, email, hash, ruolo]
+        );
+        console.log(`✅ ${ruolo === 'admin' ? 'Admin' : 'Utente'} creato: ${email}`);
+      }
     }
+
+    // Amministratore
+    await creaUtenteSeMancante(
+      'Amministrazione',
+      process.env.ADMIN_EMAIL || 'admin@cooperativascout.org',
+      process.env.ADMIN_PASSWORD || 'admin123',
+      'admin'
+    );
+    // Utente normale
+    await creaUtenteSeMancante(
+      'Cooperativa Scout',
+      process.env.USER_EMAIL || 'info@cooperativascout.org',
+      process.env.USER_PASSWORD || 'info123',
+      'utente'
+    );
+    console.log('   ⚠️  Ricorda di cambiare le password dopo il primo accesso!');
 
     await client.query('COMMIT');
     console.log('✅ Database inizializzato con successo.');
