@@ -36,10 +36,23 @@ function esc(s) {
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-function formatData(d) {
+function ymdFromAny(d) {
   if (!d) return '';
+  if (typeof d === 'string') {
+    const m = d.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (m) return m[1];
+  }
   const data = new Date(d);
-  return data.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  if (Number.isNaN(data.getTime())) return '';
+  // DATE PostgreSQL arriva come mezzanotte UTC: usiamo i pezzi UTC.
+  return data.toISOString().slice(0, 10);
+}
+
+function formatData(d) {
+  const s = ymdFromAny(d);
+  if (!s) return '';
+  const [y, m, day] = s.split('-');
+  return `${day}/${m}/${y}`;
 }
 
 function formatOra(iso) {
@@ -308,7 +321,7 @@ function renderFormPrenotazione() {
         <div class="form-row">
           <div class="form-group">
             <label>Data arrivo <span class="obbligatorio">*</span></label>
-            <input type="date" name="data_arrivo" required>
+            <input type="date" name="data_arrivo" required id="data_arrivo">
           </div>
           <div class="form-group">
             <label>Orario arrivo</label>
@@ -318,7 +331,7 @@ function renderFormPrenotazione() {
         <div class="form-row">
           <div class="form-group">
             <label>Data partenza <span class="obbligatorio">*</span></label>
-            <input type="date" name="data_partenza" required>
+            <input type="date" name="data_partenza" required id="data_partenza">
           </div>
           <div class="form-group">
             <label>Orario partenza</label>
@@ -411,6 +424,17 @@ function renderFormPrenotazione() {
   }
   selTipo.addEventListener('change', aggiornaSquadriglie);
   aggiornaSquadriglie();
+
+  const inArrivo = document.getElementById('data_arrivo');
+  const inPartenza = document.getElementById('data_partenza');
+  const oggiIso = ymd(new Date());
+  if (inArrivo) inArrivo.min = oggiIso;
+  if (inArrivo && inPartenza) {
+    inArrivo.addEventListener('change', () => {
+      inPartenza.min = inArrivo.value || oggiIso;
+      if (inPartenza.value && inPartenza.value < inPartenza.min) inPartenza.value = inPartenza.min;
+    });
+  }
 
   document.getElementById('form-pren').addEventListener('submit', async (e) => {
     e.preventDefault();
