@@ -89,9 +89,11 @@ function renderCalendario(anno, mese, eventi, onClickEvento) {
       if (dStr === oggiStr) classi.push('cal-oggi');
 
       // Eventi che coprono questo giorno
-      const eventiGiorno = eventi.filter(
-        (e) => dStr >= e.data_arrivo?.slice(0, 10) && dStr <= e.data_partenza?.slice(0, 10)
-      );
+      const eventiGiorno = eventi.filter((e) => {
+        const a = String(e.data_arrivo || '').slice(0, 10);
+        const p = String(e.data_partenza || '').slice(0, 10);
+        return a && p && dStr >= a && dStr <= p;
+      });
 
       html += `<td class="${classi.join(' ')}">`;
       html += `<div class="cal-giorno-num">${cella.data.getDate()}</div>`;
