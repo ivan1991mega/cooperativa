@@ -226,8 +226,12 @@ router.get('/:id', richiediAuth, async (req, res) => {
   if (req.user.ruolo === 'admin') {
     conflitti = await trovaConflitti({
       locationNome: pren.location_nome,
-      dataArrivo: pren.data_arrivo.toISOString().slice(0, 10),
-      dataPartenza: pren.data_partenza.toISOString().slice(0, 10),
+      dataArrivo: (pren.data_arrivo instanceof Date
+        ? pren.data_arrivo.toISOString()
+        : String(pren.data_arrivo)).slice(0, 10),
+      dataPartenza: (pren.data_partenza instanceof Date
+        ? pren.data_partenza.toISOString()
+        : String(pren.data_partenza)).slice(0, 10),
       escludiId: pren.id,
     });
   }
