@@ -27,7 +27,7 @@ function toast(testo) {
   setTimeout(() => el.remove(), 4000);
 }
 
-const stato = { calAnno: new Date().getFullYear(), calMese: new Date().getMonth(), locations: [], user: null };
+const stato = { calAnno: new Date().getFullYear(), calMese: new Date().getMonth(), locations: [], user: null, pulito: false };
 
 async function main() {
   try {
@@ -39,6 +39,10 @@ async function main() {
     }
     const loc = await API.locations();
     stato.locations = loc.locations;
+    try {
+      const p = await API.inboxPulisci();
+      if (p.scartate) toast('Tolte dalla coda ' + p.scartate + ' mail non pertinenti');
+    } catch (e) { /* ok */ }
     await render();
   } catch {
     document.getElementById('root').innerHTML = '<div class="card">Devi <a href="/">accedere</a> come admin.</div>';
@@ -63,12 +67,13 @@ async function render() {
   root.innerHTML = `
     <div class="card">
       <h2>Calendario bozze (email)</h2>
-      <p class="mut">Separato dal calendario ufficiale. La mail parte solo se premi «Invia email».</p>
+      <p class="mut">Separato dal calendario ufficiale. Newsletter, PEC e fatture vengono scartate.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
         <button class="btn" id="sync">Sincronizza Gmail</button>
+        <button class="btn btn-secondario" id="pulisci">Pulisci coda</button>
         <button class="btn btn-secondario" id="toggle">Incolla una mail</button>
       </div>
-      <p class="mut">${d.imap ? 'IMAP pronto.' : 'IMAP non configurato: usa Incolla oppure SMTP_USER / password app.'}</p>
+      <p class="mut">${d.imap ? 'IMAP pronto.' : 'IMAP non configurato.'}</p>
       <div id="incolla" style="display:none">
         <div class="form-group"><label>Oggetto</label><input id="og"></div>
         <div class="form-group"><label>Mittente</label><input id="mi"></div>
@@ -122,12 +127,20 @@ async function render() {
       render();
     } catch (e) { toast(e.message); }
   };
+  document.getElementById('pulisci').onclick = async () => {
+    try {
+      const p = await API.inboxPulisci();
+      toast('Scartate ' + (p.scartate || 0));
+      render();
+    } catch (e) { toast(e.message); }
+  };
   document.getElementById('sync').onclick = async () => {
     const b = document.getElementById('sync');
     b.disabled = true;
     try {
       const r = await API.inboxSync();
-      toast(`Letti ${r.esaminate}, nuovi ${r.nuove}, saltati ${r.saltate || 0}`);
+      const p = await API.inboxPulisci();
+      toast(`Letti ${r.esaminate}, nuovi ${r.nuove}, pulite ${p.scartate || 0}`);
       render();
     } catch (e) { toast(e.message); b.disabled = false; }
   };
@@ -191,7 +204,7 @@ async function apri(id) {
     try {
       await API.inboxAggiorna(id, payload());
       const x = await API.inboxProcessa(id);
-      toast('Nel calendario ufficiale #' + x.prenotazione.id + ' (nessuna mail inviata in automatico)');
+      toast('Nel calendario ufficiale #' + x.prenotazione.id);
       render();
     } catch (e) { toast(e.message); }
   };
