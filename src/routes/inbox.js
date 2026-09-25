@@ -4,42 +4,40 @@ import { richiediAuth, richiediAdmin } from '../middleware/auth.js';
 import { parseRichiestaEmail } from '../config/parseRichiestaEmail.js';
 import { imapConfigurato, scaricaEmailRecenti } from '../config/gmailInbox.js';
 import { isMailRichiestaCampo } from '../config/filtroMail.js';
+import { isRichiestaPassata, oggiISO } from '../config/dateInbox.js';
 
 const router = express.Router();
 router.use(richiediAuth, richiediAdmin);
 
 router.get('/stato', async (_req, res) => {
-  res.json({ imap: imapConfigurato() });
+  res.json({ imap: imapConfigurato(), oggi: oggiISO() });
 });
 
 router.get('/', async (req, res) => {
-  const { stato } = req.query;
-  const params = [];
-  let where = '';
-  if (stato) {
-    params.push(stato);
-    where = 'WHERE r.stato = $1';
+  const periodo = req.query.periodo || 'future';
+  let where = "WHERE r.stato = 'bozza'";
+  if (periodo === 'passate') {
+    where += ' AND r.data_partenza IS NOT NULL AND r.data_partenza < CURRENT_DATE';
+  } else if (periodo === 'tutte') {
+    where = "WHERE r.stato NOT IN ('scartata')";
   } else {
-    where = "WHERE r.stato <> 'scartata'";
+    where += ' AND (r.data_partenza IS NULL OR r.data_partenza >= CURRENT_DATE)';
   }
   const result = await pool.query(
     `SELECT r.*, l.nome AS location_nome
      FROM richieste_email r
      LEFT JOIN locations l ON l.id = r.location_id
      ${where}
-     ORDER BY COALESCE(r.data_arrivo, r.ricevuta_il::date) ASC, r.id ASC`,
-    params
+     ORDER BY COALESCE(r.data_arrivo, r.ricevuta_il::date) ASC, r.id ASC`
   );
-  res.json({ richieste: result.rows, imap: imapConfigurato() });
+  res.json({ richieste: result.rows, imap: imapConfigurato(), oggi: oggiISO(), periodo });
 });
 
 router.get('/:id', async (req, res) => {
   if (req.params.id === 'stato') return res.json({ imap: imapConfigurato() });
   const result = await pool.query(
-    `SELECT r.*, l.nome AS location_nome
-     FROM richieste_email r
-     LEFT JOIN locations l ON l.id = r.location_id
-     WHERE r.id = $1`,
+    `SELECT r.*, l.nome AS location_nome FROM richieste_email r
+     LEFT JOIN locations l ON l.id = r.location_id WHERE r.id = $1`,
     [req.params.id]
   );
   if (!result.rows[0]) return res.status(404).json({ errore: 'Richiesta non trovata' });
@@ -56,6 +54,9 @@ async function upsertEmail(msg, locs) {
     return { id: null, nuova: false, saltata: true };
   }
   const parsed = parseRichiestaEmail(msg, locs);
+  if (isRichiestaPassata(parsed)) {
+    return { id: null, nuova: false, saltata: true, motivo: 'passata' };
+  }
   const exists = await pool.query('SELECT id FROM richieste_email WHERE message_id = $1', [msg.message_id]);
   if (exists.rows[0]) return { id: exists.rows[0].id, nuova: false };
   const ins = await pool.query(
@@ -78,8 +79,7 @@ router.post('/sync', async (req, res) => {
   try {
     const locs = await locations();
     const mail = await scaricaEmailRecenti({ giorni: Number(req.body?.giorni || 45), limite: Number(req.body?.limite || 80) });
-    let nuove = 0;
-    let saltate = 0;
+    let nuove = 0, saltate = 0;
     for (const m of mail) {
       const r = await upsertEmail(m, locs);
       if (r.saltata) saltate += 1;
@@ -96,12 +96,9 @@ router.post('/pulisci', async (_req, res) => {
   const rows = await pool.query(`SELECT * FROM richieste_email WHERE stato = 'bozza'`);
   let n = 0;
   for (const r of rows.rows) {
-    const ok = isMailRichiestaCampo({
-      subject: r.oggetto,
-      from_addr: r.mittente,
-      text: r.corpo,
-    });
-    if (!ok) {
+    const ok = isMailRichiestaCampo({ subject: r.oggetto, from_addr: r.mittente, text: r.corpo });
+    const passata = isRichiestaPassata(r);
+    if (!ok || passata) {
       await pool.query(`UPDATE richieste_email SET stato = 'scartata', aggiornata_il = NOW() WHERE id = $1`, [r.id]);
       n += 1;
     }
@@ -121,7 +118,11 @@ router.post('/incolla', async (req, res) => {
     date: new Date(),
   };
   const r = await upsertEmail(msg, locs);
-  if (r.saltata) return res.status(400).json({ errore: 'Questa mail non sembra una richiesta di campo' });
+  if (r.saltata) {
+    return res.status(400).json({ errore: r.motivo === 'passata'
+      ? 'Date già passate: non va in coda'
+      : 'Questa mail non sembra una richiesta di campo' });
+  }
   const row = await pool.query('SELECT * FROM richieste_email WHERE id = $1', [r.id]);
   res.status(201).json({ richiesta: row.rows[0], parsed: r.parsed });
 });
@@ -152,6 +153,10 @@ router.post('/:id/processa', async (req, res) => {
     if (r.stato === 'processata') { await client.query('ROLLBACK'); return res.status(400).json({ errore: 'Già processata' }); }
     if (!r.data_arrivo || !r.data_partenza) { await client.query('ROLLBACK'); return res.status(400).json({ errore: 'Servono data arrivo e partenza prima di processare' }); }
     if (!r.location_id) { await client.query('ROLLBACK'); return res.status(400).json({ errore: 'Scegli una location prima di processare' }); }
+    if (isRichiestaPassata(r)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ errore: 'Periodo già passato: non si processa nel calendario ufficiale. Scartala o cambiane le date.' });
+    }
     const nota = r.nota || r.corpo || r.oggetto || 'Importata da email';
     const pren = await client.query(
       `INSERT INTO prenotazioni
