@@ -14,6 +14,7 @@ import prenotazioniRoutes from './routes/prenotazioni.js';
 import chatRoutes from './routes/chat.js';
 import notificheRoutes from './routes/notifiche.js';
 import inboxRoutes from './routes/inbox.js';
+import { dopoCambioStato } from './hooks/dopoStato.js';
 
 dotenv.config();
 
@@ -41,6 +42,22 @@ const authLimiter = rateLimit({
 });
 
 app.use('/api/auth', authLimiter, authRoutes);
+
+app.use('/api/prenotazioni', (req, res, next) => {
+  if (req.method === 'PATCH' && /\/\d+\/stato$/.test(req.path)) {
+    const orig = res.json.bind(res);
+    res.json = (body) => {
+      if (body && body.prenotazione && req.body && req.body.stato) {
+        dopoCambioStato(body.prenotazione, req.body.stato).catch((e) =>
+          console.error('Email stato:', e.message)
+        );
+      }
+      return orig(body);
+    };
+  }
+  next();
+});
+
 app.use('/api/prenotazioni', prenotazioniRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/notifiche', notificheRoutes);
