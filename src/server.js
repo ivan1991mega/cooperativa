@@ -14,7 +14,7 @@ import prenotazioniRoutes from './routes/prenotazioni.js';
 import chatRoutes from './routes/chat.js';
 import notificheRoutes from './routes/notifiche.js';
 import inboxRoutes from './routes/inbox.js';
-import { dopoCambioStato } from './hooks/dopoStato.js';
+import mailManualeRoutes from './routes/mailManuale.js';
 
 dotenv.config();
 
@@ -42,26 +42,11 @@ const authLimiter = rateLimit({
 });
 
 app.use('/api/auth', authLimiter, authRoutes);
-
-app.use('/api/prenotazioni', (req, res, next) => {
-  if (req.method === 'PATCH' && /\/\d+\/stato$/.test(req.path)) {
-    const orig = res.json.bind(res);
-    res.json = (body) => {
-      if (body && body.prenotazione && req.body && req.body.stato) {
-        dopoCambioStato(body.prenotazione, req.body.stato).catch((e) =>
-          console.error('Email stato:', e.message)
-        );
-      }
-      return orig(body);
-    };
-  }
-  next();
-});
-
 app.use('/api/prenotazioni', prenotazioniRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/notifiche', notificheRoutes);
 app.use('/api/inbox', inboxRoutes);
+app.use('/api/mail', mailManualeRoutes);
 
 app.get('/api/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
 
@@ -91,7 +76,6 @@ io.on('connection', (socket) => {
   if (socket.user) {
     socket.join(`user:${socket.user.id}`);
   }
-
   socket.on('entra-chat', (prenotazioneId) => {
     socket.join(`pren:${prenotazioneId}`);
   });
@@ -109,9 +93,7 @@ async function initDbConRetry(tentativi = 5) {
       return true;
     } catch (err) {
       console.error(`Init DB tentativo ${i}/${tentativi} fallito:`, err.message);
-      if (i < tentativi) {
-        await new Promise((r) => setTimeout(r, 3000));
-      }
+      if (i < tentativi) await new Promise((r) => setTimeout(r, 3000));
     }
   }
   return false;
@@ -120,13 +102,10 @@ async function initDbConRetry(tentativi = 5) {
 async function start() {
   if (process.env.DATABASE_URL) {
     const ok = await initDbConRetry();
-    if (!ok) {
-      console.error('Database non raggiungibile dopo vari tentativi. Verifica DATABASE_URL su Railway.');
-    }
+    if (!ok) console.error('Database non raggiungibile. Verifica DATABASE_URL su Railway.');
   } else {
-    console.warn('Avvio senza DATABASE_URL: collega un database PostgreSQL su Railway.');
+    console.warn('Avvio senza DATABASE_URL.');
   }
-
   httpServer.listen(PORT, () => {
     console.log(`Server Cooperativa Scout attivo sulla porta ${PORT}`);
   });

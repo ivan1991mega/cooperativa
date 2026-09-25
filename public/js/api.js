@@ -43,4 +43,13 @@ const API = {
   inboxAggiorna(id, d) { return this.patch(`/api/inbox/${id}`, d); },
   inboxProcessa(id) { return this.post(`/api/inbox/${id}/processa`); },
   inboxScarta(id) { return this.post(`/api/inbox/${id}/scarta`); },
+  mailBozzaInbox(id, tipo) {
+    const q = tipo ? `?tipo=${encodeURIComponent(tipo)}` : '';
+    return this.get(`/api/mail/bozza/inbox/${id}${q}`);
+  },
+  mailBozzaPren(id, tipo) {
+    const q = tipo ? `?tipo=${encodeURIComponent(tipo)}` : '';
+    return this.get(`/api/mail/bozza/prenotazione/${id}${q}`);
+  },
+  mailInvia(d) { return this.post('/api/mail/invia', d); },
 };
