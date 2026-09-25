@@ -3,6 +3,7 @@ import { pool } from '../config/db.js';
 import { richiediAuth, richiediAdmin } from '../middleware/auth.js';
 import { parseRichiestaEmail } from '../config/parseRichiestaEmail.js';
 import { imapConfigurato, scaricaEmailRecenti } from '../config/gmailInbox.js';
+import { isMailRichiestaCampo } from '../config/filtroMail.js';
 
 const router = express.Router();
 router.use(richiediAuth, richiediAdmin);
@@ -18,6 +19,8 @@ router.get('/', async (req, res) => {
   if (stato) {
     params.push(stato);
     where = 'WHERE r.stato = $1';
+  } else {
+    where = "WHERE r.stato <> 'scartata'";
   }
   const result = await pool.query(
     `SELECT r.*, l.nome AS location_nome
@@ -31,6 +34,7 @@ router.get('/', async (req, res) => {
 });
 
 router.get('/:id', async (req, res) => {
+  if (req.params.id === 'stato') return res.json({ imap: imapConfigurato() });
   const result = await pool.query(
     `SELECT r.*, l.nome AS location_nome
      FROM richieste_email r
@@ -48,6 +52,9 @@ async function locations() {
 }
 
 async function upsertEmail(msg, locs) {
+  if (!isMailRichiestaCampo(msg)) {
+    return { id: null, nuova: false, saltata: true };
+  }
   const parsed = parseRichiestaEmail(msg, locs);
   const exists = await pool.query('SELECT id FROM richieste_email WHERE message_id = $1', [msg.message_id]);
   if (exists.rows[0]) return { id: exists.rows[0].id, nuova: false };
@@ -72,15 +79,34 @@ router.post('/sync', async (req, res) => {
     const locs = await locations();
     const mail = await scaricaEmailRecenti({ giorni: Number(req.body?.giorni || 45), limite: Number(req.body?.limite || 80) });
     let nuove = 0;
+    let saltate = 0;
     for (const m of mail) {
       const r = await upsertEmail(m, locs);
-      if (r.nuova) nuove += 1;
+      if (r.saltata) saltate += 1;
+      else if (r.nuova) nuove += 1;
     }
-    res.json({ ok: true, esaminate: mail.length, nuove });
+    res.json({ ok: true, esaminate: mail.length, nuove, saltate });
   } catch (err) {
     console.error('Sync inbox:', err);
     res.status(500).json({ errore: err.message || 'Sync fallita' });
   }
+});
+
+router.post('/pulisci', async (_req, res) => {
+  const rows = await pool.query(`SELECT * FROM richieste_email WHERE stato = 'bozza'`);
+  let n = 0;
+  for (const r of rows.rows) {
+    const ok = isMailRichiestaCampo({
+      subject: r.oggetto,
+      from_addr: r.mittente,
+      text: r.corpo,
+    });
+    if (!ok) {
+      await pool.query(`UPDATE richieste_email SET stato = 'scartata', aggiornata_il = NOW() WHERE id = $1`, [r.id]);
+      n += 1;
+    }
+  }
+  res.json({ ok: true, scartate: n });
 });
 
 router.post('/incolla', async (req, res) => {
@@ -95,6 +121,7 @@ router.post('/incolla', async (req, res) => {
     date: new Date(),
   };
   const r = await upsertEmail(msg, locs);
+  if (r.saltata) return res.status(400).json({ errore: 'Questa mail non sembra una richiesta di campo' });
   const row = await pool.query('SELECT * FROM richieste_email WHERE id = $1', [r.id]);
   res.status(201).json({ richiesta: row.rows[0], parsed: r.parsed });
 });
