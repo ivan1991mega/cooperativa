@@ -21,6 +21,7 @@
     "jsonwebtoken": "^9.0.2",
     "nodemailer": "^6.9.16",
     "pg": "^8.13.1",
-    "socket.io": "^4.8.1"
+    "socket.io": "^4.8.1",
+    "imapflow": "^1.0.186"
   }
 }
