@@ -1,7 +1,6 @@
 function esc(s) {
   if (s == null) return '';
-  return String(s).replace(/[&<>"']/g, (c) =>
-    ({ '&': '&', '<': '<', '>': '>', '"': '"', "'": '&#39;' }[c]));
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
 function ymdFromAny(d) {
   if (!d) return '';
@@ -63,13 +62,13 @@ async function render() {
 
   root.innerHTML = `
     <div class="card">
-      <h2>Richieste da email (bozze)</h2>
-      <p class="mut">Non entrano nel calendario ufficiale finché non le processi.</p>
+      <h2>Calendario bozze (email)</h2>
+      <p class="mut">Separato dal calendario ufficiale. La mail parte solo se premi «Invia email».</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
         <button class="btn" id="sync">Sincronizza Gmail</button>
         <button class="btn btn-secondario" id="toggle">Incolla una mail</button>
       </div>
-      <p class="mut">${d.imap ? 'IMAP pronto (SMTP_USER / SMTP_PASSWORD).' : 'IMAP non configurato: usa Incolla, oppure metti su Railway SMTP_USER e la password per le app Gmail.'}</p>
+      <p class="mut">${d.imap ? 'IMAP pronto.' : 'IMAP non configurato: usa Incolla oppure SMTP_USER / password app.'}</p>
       <div id="incolla" style="display:none">
         <div class="form-group"><label>Oggetto</label><input id="og"></div>
         <div class="form-group"><label>Mittente</label><input id="mi"></div>
@@ -87,7 +86,7 @@ async function render() {
     </div>
     <div class="card">
       <h3>In coda (${bozze.length})</h3>
-      ${bozze.length === 0 ? '<div class="vuoto">Nessuna bozza.</div>' : `
+      ${bozze.length === 0 ? '<div class="vuoto">Nessuna bozza futura.</div>' : `
       <div class="tabella-scroll"><table class="tabella">
         <thead><tr><th>Nome</th><th>Date</th><th>Location</th><th></th></tr></thead>
         <tbody>
@@ -128,13 +127,20 @@ async function render() {
     b.disabled = true;
     try {
       const r = await API.inboxSync();
-      toast(`Letti ${r.esaminate}, nuovi ${r.nuove}`);
+      toast(`Letti ${r.esaminate}, nuovi ${r.nuove}, saltati ${r.saltate || 0}`);
       render();
     } catch (e) { toast(e.message); b.disabled = false; }
   };
   root.querySelectorAll('[data-open]').forEach((btn) => {
     btn.onclick = () => apri(Number(btn.dataset.open));
   });
+}
+
+async function caricaBozza(id, tipo) {
+  const b = await API.mailBozzaInbox(id, tipo);
+  document.getElementById('mail-to').value = b.to || '';
+  document.getElementById('mail-og').value = b.oggetto || '';
+  document.getElementById('mail-tx').value = b.testo || '';
 }
 
 async function apri(id) {
@@ -153,13 +159,24 @@ async function apri(id) {
     </div>
     <div class="form-group"><label>Location</label><select id="l"><option value="">—</option>${opts}</select></div>
     <div class="form-group"><label>Gruppo</label><input id="g" value="${esc(r.gruppo_scout || '')}"></div>
-    <div class="form-group"><label>Mail</label><textarea readonly rows="7">${esc(r.corpo || '')}</textarea></div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <div class="form-group"><label>Mail originale</label><textarea readonly rows="6">${esc(r.corpo || '')}</textarea></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
       <button class="btn" id="save">Salva</button>
       <button class="btn" id="proc">Processa nel calendario ufficiale</button>
       <button class="btn btn-secondario" id="del">Scarta</button>
     </div>
+    <h3>Rispondi via email</h3>
+    <p class="mut">Non parte da sola. Modifica il testo e premi Invia solo quando sei pronto.</p>
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <button class="btn btn-secondario btn-piccolo" id="tpl-ok">Bozza conferma</button>
+      <button class="btn btn-secondario btn-piccolo" id="tpl-no">Bozza rifiuto</button>
+    </div>
+    <div class="form-group"><label>A</label><input id="mail-to" placeholder="email del capo"></div>
+    <div class="form-group"><label>Oggetto</label><input id="mail-og"></div>
+    <div class="form-group"><label>Testo</label><textarea id="mail-tx" rows="10"></textarea></div>
+    <button class="btn" id="mail-send">Invia email</button>
   `;
+  try { await caricaBozza(id, 'conferma'); } catch (e) { /* niente indirizzo */ }
   const payload = () => ({
     titolo: document.getElementById('t').value,
     data_arrivo: document.getElementById('a').value || null,
@@ -174,13 +191,25 @@ async function apri(id) {
     try {
       await API.inboxAggiorna(id, payload());
       const x = await API.inboxProcessa(id);
-      toast('Prenotazione #' + x.prenotazione.id + ' creata (stato ricevuta)');
+      toast('Nel calendario ufficiale #' + x.prenotazione.id + ' (nessuna mail inviata in automatico)');
       render();
     } catch (e) { toast(e.message); }
   };
   document.getElementById('del').onclick = async () => {
     if (!confirm('Scartare?')) return;
     try { await API.inboxScarta(id); toast('Scartata'); render(); } catch (e) { toast(e.message); }
+  };
+  document.getElementById('tpl-ok').onclick = () => caricaBozza(id, 'conferma');
+  document.getElementById('tpl-no').onclick = () => caricaBozza(id, 'rifiuto');
+  document.getElementById('mail-send').onclick = async () => {
+    const to = document.getElementById('mail-to').value.trim();
+    const oggetto = document.getElementById('mail-og').value.trim();
+    const testo = document.getElementById('mail-tx').value.trim();
+    if (!confirm('Inviare ora a ' + to + '?')) return;
+    try {
+      const r = await API.mailInvia({ to, oggetto, testo });
+      toast(r.simulated ? 'SMTP non configurato: mail solo in log' : 'Email inviata a ' + to);
+    } catch (e) { toast(e.message); }
   };
 }
 
