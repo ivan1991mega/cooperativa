@@ -4,28 +4,22 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-/**
- * Crea tutte le tabelle necessarie se non esistono già.
- * Idempotente: può essere eseguito più volte senza problemi.
- */
 async function initDb() {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    // --- UTENTI ---
     await client.query(`
       CREATE TABLE IF NOT EXISTS users (
         id            SERIAL PRIMARY KEY,
         nome          VARCHAR(120) NOT NULL,
         email         VARCHAR(180) UNIQUE NOT NULL,
         password_hash VARCHAR(255) NOT NULL,
-        ruolo         VARCHAR(20)  NOT NULL DEFAULT 'utente', -- 'utente' | 'admin'
+        ruolo         VARCHAR(20)  NOT NULL DEFAULT 'utente',
         creato_il     TIMESTAMPTZ  NOT NULL DEFAULT NOW()
       );
     `);
 
-    // --- LOCATION ---
     await client.query(`
       CREATE TABLE IF NOT EXISTS locations (
         id     SERIAL PRIMARY KEY,
@@ -34,7 +28,6 @@ async function initDb() {
       );
     `);
 
-    // Popola le location fisse (solo se la tabella è vuota).
     const locCount = await client.query('SELECT COUNT(*) FROM locations');
     if (parseInt(locCount.rows[0].count, 10) === 0) {
       const locations = [
@@ -47,28 +40,24 @@ async function initDb() {
         'Col Pigner',
       ];
       for (let i = 0; i < locations.length; i++) {
-        await client.query(
-          'INSERT INTO locations (nome, ordine) VALUES ($1, $2)',
-          [locations[i], i]
-        );
+        await client.query('INSERT INTO locations (nome, ordine) VALUES ($1, $2)', [locations[i], i]);
       }
     }
 
-    // --- PRENOTAZIONI ---
     await client.query(`
       CREATE TABLE IF NOT EXISTS prenotazioni (
         id                SERIAL PRIMARY KEY,
         user_id           INT REFERENCES users(id) ON DELETE SET NULL,
         location_id       INT NOT NULL REFERENCES locations(id),
         data_arrivo       DATE NOT NULL,
-        ora_arrivo        VARCHAR(20),          -- es. "mattina", "15:00"
+        ora_arrivo        VARCHAR(20),
         data_partenza     DATE NOT NULL,
         ora_partenza      VARCHAR(20),
-        nota              TEXT NOT NULL,        -- nota obbligatoria arrivo/partenza
+        nota              TEXT NOT NULL,
         numero_persone    INT NOT NULL DEFAULT 0,
-        tipologia_unita   VARCHAR(40) NOT NULL, -- lupetti/coccinelle | esploratori/guide | clan/fuoco | ALTRO
-        numero_squadriglie INT,                 -- obbligatorio solo se esploratori/guide
-        gruppo_scout      VARCHAR(120),          -- gruppo di appartenenza (obbligatorio lato form)
+        tipologia_unita   VARCHAR(40) NOT NULL,
+        numero_squadriglie INT,
+        gruppo_scout      VARCHAR(120),
         referente_nome    VARCHAR(120),
         referente_contatto VARCHAR(120),
         provenienza_paese VARCHAR(120),
@@ -76,41 +65,60 @@ async function initDb() {
         trasbordo         BOOLEAN NOT NULL DEFAULT FALSE,
         trasbordo_giorni  INT NOT NULL DEFAULT 0,
         stato             VARCHAR(30) NOT NULL DEFAULT 'ricevuta',
-        -- stati: 'ricevuta' | 'in_lavorazione' | 'confermata' | 'rifiutata'
         creata_da_admin   BOOLEAN NOT NULL DEFAULT FALSE,
         creata_il         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         aggiornata_il     TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `);
 
-    // --- MESSAGGI CHAT ---
     await client.query(`
       CREATE TABLE IF NOT EXISTS messaggi (
         id             SERIAL PRIMARY KEY,
         prenotazione_id INT REFERENCES prenotazioni(id) ON DELETE CASCADE,
         mittente_id    INT REFERENCES users(id) ON DELETE SET NULL,
-        mittente_ruolo VARCHAR(20) NOT NULL,   -- 'utente' | 'admin'
+        mittente_ruolo VARCHAR(20) NOT NULL,
         testo          TEXT NOT NULL DEFAULT '',
-        allegato_nome  VARCHAR(255),           -- nome file (se presente)
-        allegato_tipo  VARCHAR(120),           -- MIME type (es. image/jpeg, application/pdf)
-        allegato_dati  TEXT,                    -- contenuto file in base64 (data URL)
+        allegato_nome  VARCHAR(255),
+        allegato_tipo  VARCHAR(120),
+        allegato_dati  TEXT,
         letto          BOOLEAN NOT NULL DEFAULT FALSE,
         creato_il      TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `);
 
-    // Migrazione: se la tabella messaggi esisteva già senza le colonne allegato,
-    // le aggiunge (ALTER ... IF NOT EXISTS è sicuro e idempotente).
     await client.query(`ALTER TABLE messaggi ALTER COLUMN testo SET DEFAULT '';`);
     await client.query(`ALTER TABLE messaggi ADD COLUMN IF NOT EXISTS allegato_nome VARCHAR(255);`);
     await client.query(`ALTER TABLE messaggi ADD COLUMN IF NOT EXISTS allegato_tipo VARCHAR(120);`);
     await client.query(`ALTER TABLE messaggi ADD COLUMN IF NOT EXISTS allegato_dati TEXT;`);
-
-    // Migrazione: campi aggiunti dopo la prima versione
     await client.query(`ALTER TABLE prenotazioni ADD COLUMN IF NOT EXISTS numero_squadriglie INT;`);
     await client.query(`ALTER TABLE prenotazioni ADD COLUMN IF NOT EXISTS gruppo_scout VARCHAR(120);`);
 
-    // --- NOTIFICHE ---
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS richieste_email (
+        id                 SERIAL PRIMARY KEY,
+        message_id         VARCHAR(320) UNIQUE,
+        oggetto            TEXT,
+        mittente           VARCHAR(255),
+        corpo              TEXT,
+        titolo             VARCHAR(180),
+        data_arrivo        DATE,
+        data_partenza      DATE,
+        location_id        INT REFERENCES locations(id) ON DELETE SET NULL,
+        gruppo_scout       VARCHAR(120),
+        referente_nome     VARCHAR(120),
+        referente_contatto VARCHAR(120),
+        numero_persone     INT NOT NULL DEFAULT 0,
+        tipologia_unita    VARCHAR(40) DEFAULT 'ALTRO',
+        nota               TEXT,
+        stato              VARCHAR(20) NOT NULL DEFAULT 'bozza',
+        prenotazione_id    INT REFERENCES prenotazioni(id) ON DELETE SET NULL,
+        ricevuta_il        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        aggiornata_il      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_rich_email_date ON richieste_email(data_arrivo, data_partenza);`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_rich_email_stato ON richieste_email(stato);`);
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS notifiche (
         id          SERIAL PRIMARY KEY,
@@ -122,60 +130,49 @@ async function initDb() {
       );
     `);
 
-    // Indici utili
     await client.query(`CREATE INDEX IF NOT EXISTS idx_pren_location ON prenotazioni(location_id);`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_pren_date ON prenotazioni(data_arrivo, data_partenza);`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_msg_pren ON messaggi(prenotazione_id);`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_notif_user ON notifiche(user_id);`);
 
-    // --- UTENTI DI DEFAULT ---
-    // Crea un account solo se quell'email non esiste già (idempotente).
-    // I valori si possono sovrascrivere con le variabili d'ambiente.
     async function creaUtenteSeMancante(nome, email, password, ruolo) {
       const esiste = await client.query('SELECT id FROM users WHERE email = $1', [email]);
       if (esiste.rows.length === 0) {
         const hash = await bcrypt.hash(password, 10);
         await client.query(
-          `INSERT INTO users (nome, email, password_hash, ruolo)
-           VALUES ($1, $2, $3, $4)`,
+          `INSERT INTO users (nome, email, password_hash, ruolo) VALUES ($1, $2, $3, $4)`,
           [nome, email, hash, ruolo]
         );
-        console.log(`✅ ${ruolo === 'admin' ? 'Admin' : 'Utente'} creato: ${email}`);
+        console.log(`Creato ${ruolo}: ${email}`);
       }
     }
 
-    // Amministratore
     await creaUtenteSeMancante(
       'Amministrazione',
       process.env.ADMIN_EMAIL || 'admin@cooperativascout.org',
       process.env.ADMIN_PASSWORD || 'admin123',
       'admin'
     );
-    // Utente normale
     await creaUtenteSeMancante(
       'Cooperativa Scout',
       process.env.USER_EMAIL || 'info@cooperativascout.org',
       process.env.USER_PASSWORD || 'info123',
       'utente'
     );
-    console.log('   ⚠️  Ricorda di cambiare le password dopo il primo accesso!');
 
     await client.query('COMMIT');
-    console.log('✅ Database inizializzato con successo.');
+    console.log('Database inizializzato con successo.');
   } catch (err) {
     await client.query('ROLLBACK');
-    console.error('❌ Errore inizializzazione database:', err);
+    console.error('Errore inizializzazione database:', err);
     throw err;
   } finally {
     client.release();
   }
 }
 
-// Se eseguito direttamente da riga di comando
 if (import.meta.url === `file://${process.argv[1]}`) {
-  initDb()
-    .then(() => process.exit(0))
-    .catch(() => process.exit(1));
+  initDb().then(() => process.exit(0)).catch(() => process.exit(1));
 }
 
 export default initDb;
