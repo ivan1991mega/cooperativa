@@ -5,6 +5,7 @@ import { parseRichiestaEmail } from '../config/parseRichiestaEmail.js';
 import { imapConfigurato, scaricaEmailRecenti } from '../config/gmailInbox.js';
 import { isMailRichiestaCampo } from '../config/filtroMail.js';
 import { isRichiestaPassata, oggiISO } from '../config/dateInbox.js';
+import { emailDestinatario, inviaMailPresaInCarico } from '../config/invioConferma.js';
 
 const router = express.Router();
 router.use(richiediAuth, richiediAdmin);
@@ -170,7 +171,16 @@ router.post('/:id/processa', async (req, res) => {
     );
     await client.query(`UPDATE richieste_email SET stato = 'processata', prenotazione_id = $1, aggiornata_il = NOW() WHERE id = $2`, [pren.rows[0].id, r.id]);
     await client.query('COMMIT');
-    res.json({ ok: true, prenotazione: pren.rows[0] });
+    const locRow = await pool.query('SELECT nome FROM locations WHERE id = $1', [r.location_id]);
+    const to = emailDestinatario(r.referente_contatto, r.mittente, r.corpo);
+    inviaMailPresaInCarico({
+      to,
+      location: locRow.rows[0]?.nome,
+      arrivo: r.data_arrivo,
+      partenza: r.data_partenza,
+      nome: r.referente_nome || r.titolo,
+    }).catch((e) => console.error('Email processa:', e.message));
+    res.json({ ok: true, prenotazione: pren.rows[0], email: to || null });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Processa inbox:', err);
