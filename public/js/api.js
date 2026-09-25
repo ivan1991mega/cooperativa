@@ -37,6 +37,7 @@ const API = {
     return this.get(`/api/inbox${q}`);
   },
   inboxSync(d) { return this.post('/api/inbox/sync', d || {}); },
+  inboxPulisci() { return this.post('/api/inbox/pulisci'); },
   inboxIncolla(d) { return this.post('/api/inbox/incolla', d); },
   inboxDettaglio(id) { return this.get(`/api/inbox/${id}`); },
   inboxAggiorna(id, d) { return this.patch(`/api/inbox/${id}`, d); },
